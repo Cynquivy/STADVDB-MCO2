@@ -1,0 +1,7 @@
+# Store and check out text files with LF line endings on every OS.
+# Without this, Windows (core.autocrlf=true) turns shell scripts into CRLF and bash fails on them;
+# git archive (used by scripts/deploy.sh) would also ship CRLF files to the Linux VMs.
+* text=auto eol=lf
+*.pdf binary
+*.png binary
+*.jpg binary

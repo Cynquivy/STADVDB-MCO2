@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Node status · MCO2 DDB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@350..600&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="/">MCO2 <span>DDB</span></a>
+    <nav class="nav-links" aria-label="Pages">
+      <a class="nav-link is-active" href="/status.html">Status</a>
+    </nav>
+    <span class="served-by" id="served-by">Connecting…</span>
+  </header>
+
+  <main class="page">
+    <section class="intro">
+      <p class="eyebrow">Distributed database</p>
+      <h1>Node status</h1>
+      <p class="intro-text">
+        Every <span id="interval">2</span> seconds, this app opens a new connection to each node's
+        database and runs <code>SELECT 1</code>. It also reads the row counts and the replication log.
+      </p>
+      <div class="intro-actions">
+        <button class="btn-primary" id="check-now" type="button">Check now</button>
+        <span class="muted" id="checked-at">Waiting for the first check…</span>
+      </div>
+    </section>
+
+    <div class="banner" id="banner" role="alert" hidden></div>
+
+    <section class="node-grid" id="nodes" aria-live="polite"></section>
+
+    <section class="legend" aria-label="What the statuses mean">
+      <div class="legend-item">
+        <span class="badge badge-up"><span class="dot"></span>UP</span>
+        <p>Reachable and up to date. Used for reads and writes.</p>
+      </div>
+      <div class="legend-item">
+        <span class="badge badge-recovering"><span class="dot"></span>RECOVERING</span>
+        <p>Back online but still owed writes it missed. Not used until they are replayed.</p>
+      </div>
+      <div class="legend-item">
+        <span class="badge badge-down"><span class="dot"></span>DOWN</span>
+        <p>Not responding. Writes it misses wait in the other copy's replication log.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">STADVDB MCO2 · Three-node distributed database</footer>
+
+  <script type="module" src="/js/status.js"></script>
+</body>
+</html>
