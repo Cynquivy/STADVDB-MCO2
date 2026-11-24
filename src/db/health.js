@@ -13,6 +13,8 @@
 // That result is only displayed; a node's status depends on its database alone.
 import mysql from 'mysql2/promise';
 import { config, NODES, NODE_IDS } from '../config.js';
+import { getRoles, updateRoles } from '../ddb/roles.js';
+import { describeError } from './errors.js';
 import { connectionOptions } from './pools.js';
 
 export const STATUS = Object.freeze({ UP: 'UP', DOWN: 'DOWN', RECOVERING: 'RECOVERING' });
@@ -20,12 +22,12 @@ export const STATUS = Object.freeze({ UP: 'UP', DOWN: 'DOWN', RECOVERING: 'RECOV
 const APP_CHECK_TIMEOUT_MS = 1500;
 
 let latest = { checkedAt: null, durationMs: null, nodes: {} }; // result of the last finished check
-const markedDownAt = {}; // nodeId → when a write saw that node fail (see markDown)
+const markedDownAt = {}; // nodeId → when a read or write saw that node fail (see markDown)
 let running = null; // the check in progress, so overlapping refresh requests share it
 let timer = null;
 let stopped = false;
 
-// ---------- public API (used by routes now, and by the read/write/recovery code later) ----------
+// ---------- public API (used by the routes, the read path, and later the write/recovery code) ----------
 
 export function startHealthChecks() {
   stopped = false;
@@ -47,9 +49,18 @@ export function stopHealthChecks() {
 }
 
 // Runs a check now. If one is already running, waits for that one instead of starting another.
-export function refreshNow() {
+// With { fresh: true } (after Kill / Restore), a check that started BEFORE this call doesn't count,
+// because it may have looked at the node before its state changed: wait for it, then check again.
+export async function refreshNow({ fresh = false } = {}) {
+  if (fresh && running) await running.catch(() => {});
   if (!running) running = runCheck().finally(() => (running = null));
   return running;
+}
+
+// Reads call this first, so a request that arrives right after the app starts waits for the
+// first check (about a second) instead of finding every node "not checked yet" and failing.
+export async function waitForFirstCheck() {
+  if (!latest.checkedAt) await refreshNow();
 }
 
 export function getStatus(nodeId) {
@@ -61,15 +72,16 @@ export function isAvailable(nodeId) {
   return getStatus(nodeId) === STATUS.UP;
 }
 
-// Called by the write path when a connection to a node fails mid-write (§5.3): the node is
-// DOWN for this app right away, instead of waiting up to HEALTH_INTERVAL_MS for the next check.
+// Called when a read or write loses its connection to a node (§5.3): the node is DOWN for this
+// app right away, instead of waiting up to HEALTH_INTERVAL_MS for the next check.
 // The next check that STARTS after this moment decides the node's real status again.
 export function markDown(nodeId, reason) {
   markedDownAt[nodeId] = Date.now();
   const node = latest.nodes[nodeId];
   if (node && node.status !== STATUS.DOWN) {
-    console.log(`[health] ${NODES[nodeId].name}: ${node.status} → DOWN (write failed: ${reason})`);
+    console.log(`[health] ${NODES[nodeId].name}: ${node.status} → DOWN (${reason})`);
     latest.nodes[nodeId] = { ...node, status: STATUS.DOWN, markedDownReason: reason };
+    updateRoles(getStatus); // a fragment may take over as primary right away
   }
 }
 
@@ -81,6 +93,8 @@ export function snapshot() {
     pendingGraceMs: config.pendingGraceMs,
     checkedAt: latest.checkedAt,
     durationMs: latest.durationMs,
+    adminEnabled: Boolean(config.adminToken), // the Kill / Restore buttons need ADMIN_TOKEN
+    roles: getRoles(),
     nodes: NODE_IDS.map((id) => latest.nodes[id] ?? { ...describeNode(id), status: 'CHECKING' }),
   };
 }
@@ -110,8 +124,8 @@ async function runCheck() {
     const db = databases[i];
     let status = !db.reachable ? STATUS.DOWN : owed[id].missed > 0 ? STATUS.RECOVERING : STATUS.UP;
 
-    // If a write saw this node fail after this check had already started, this check's result
-    // may be stale, so keep the node DOWN until a check that started later says otherwise.
+    // If a read or write saw this node fail after this check had already started, this check's
+    // result may be stale, so keep the node DOWN until a check that started later says otherwise.
     if (markedDownAt[id] >= startedAt) status = STATUS.DOWN;
     else delete markedDownAt[id];
 
@@ -120,6 +134,7 @@ async function runCheck() {
   });
 
   latest = { checkedAt: new Date().toISOString(), durationMs: Date.now() - startedAt, nodes };
+  updateRoles(getStatus);
 }
 
 async function checkDatabase(nodeId) {
@@ -213,12 +228,6 @@ function describeNode(id) {
     isThisApp: id === config.nodeId,
     expectedIds: { step: 3, offset: id }, // from zz-ddb.cnf: Node 1 → 1, Node 2 → 2, Node 3 → 3
   };
-}
-
-function describeError(err) {
-  const message = err.message || err.errors?.[0]?.message || '';
-  if (!err.code) return message || String(err);
-  return message && !message.includes(err.code) ? `${err.code}: ${message}` : message || err.code;
 }
 
 function logChange(id, before, after, error) {

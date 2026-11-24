@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Payments · MCO2 DDB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@350..600&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="/">MCO2 <span>DDB</span></a>
+    <nav class="nav-links" aria-label="Pages">
+      <a class="nav-link" href="/status.html">Status</a>
+      <a class="nav-link is-active" href="/payments.html" aria-current="page">Payments</a>
+    </nav>
+    <span class="app-pill" id="app-node" title="The VM whose app served this page">Connecting…</span>
+  </header>
+
+  <main class="page">
+    <section class="intro">
+      <p class="eyebrow">Distributed database</p>
+      <h1>Payments</h1>
+      <p class="intro-text">
+        You never pick a node. The app reads from its own node when that node holds the payments,
+        otherwise from another copy, and falls back to the second copy when a node is down.
+        Each search shows which node answered.
+      </p>
+    </section>
+
+    <form class="filters" id="filters" novalidate>
+      <div class="filter-grid">
+        <div class="field">
+          <label for="f-store">Store</label>
+          <select class="input" id="f-store" name="store">
+            <option value="">All stores</option>
+            <option value="1">Store 1</option>
+            <option value="2">Store 2</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-id">Payment ID</label>
+          <input class="input" id="f-id" name="id" inputmode="numeric" autocomplete="off" placeholder="e.g. 16049">
+        </div>
+        <div class="field">
+          <label for="f-customer">Customer ID</label>
+          <input class="input" id="f-customer" name="customer" inputmode="numeric" autocomplete="off" placeholder="1 – 599">
+        </div>
+        <div class="field">
+          <label for="f-from">Paid from</label>
+          <input class="input" id="f-from" name="from" type="date">
+        </div>
+        <div class="field">
+          <label for="f-to">Paid until</label>
+          <input class="input" id="f-to" name="to" type="date">
+        </div>
+        <div class="field">
+          <label for="f-min">Min amount</label>
+          <input class="input" id="f-min" name="min" inputmode="decimal" autocomplete="off" placeholder="0.00">
+        </div>
+        <div class="field">
+          <label for="f-max">Max amount</label>
+          <input class="input" id="f-max" name="max" inputmode="decimal" autocomplete="off" placeholder="999.99">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn-primary" id="search" type="submit">Search</button>
+        <button class="btn-tint" id="clear" type="button">Clear</button>
+      </div>
+    </form>
+
+    <div class="banner" id="banner" role="alert" hidden></div>
+
+    <section class="route" id="route" aria-live="polite" hidden></section>
+
+    <section class="results" aria-labelledby="results-summary">
+      <div class="results-head">
+        <p class="muted" id="results-summary">Searching…</p>
+        <div class="pager">
+          <button class="btn-tint btn-small" id="prev" type="button" disabled>Previous</button>
+          <button class="btn-tint btn-small" id="next" type="button" disabled>Next</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th scope="col" class="num">Payment ID</th>
+              <th scope="col" class="num">Customer</th>
+              <th scope="col">Store</th>
+              <th scope="col" class="num">Amount</th>
+              <th scope="col">Paid on</th>
+              <th scope="col">Read from</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">STADVDB MCO2 · Three-node distributed database</footer>
+
+  <script type="module" src="/js/payments.js"></script>
+</body>
+</html>
