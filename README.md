@@ -2,7 +2,7 @@
 
 Our project for STADVDB MCO2 (Transaction Management), DLSU, Term 1 AY 2026–2027.
 
-One table of payments is spread across **three MySQL servers** on the CCS Cloud. The **same web
+One modified table of payments from the Sakila DB is spread across **three MySQL servers** on the CCS Cloud. The **same web
 app runs on all three**. Users can read and write from any node, and the app:
 
 - keeps every copy of the data consistent,
