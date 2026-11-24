@@ -12,7 +12,7 @@ app runs on all three**. Users can read and write from any node, and the app:
 We wrote the replication and recovery logic ourselves (in `src/ddb/`). MySQL's built-in replication
 is **not** used; the rubric penalises it.
 
-> **Status:** steps 1 (node status page) and 2 (reads) are built but not deployed yet. See
+> **Status:** steps 1 (node status page), 2 (reads) and 3 (writes) are built but not deployed yet. See
 > [Running it](#running-it) and the [build plan](#build-plan).
 
 ---
@@ -84,8 +84,16 @@ read has a first choice and a fallback:
    a `replication_log` table: a to-do list of copies that still need updating.
 5. **Commit the first copy, then the second**, then tick off the log entry.
 
-If one copy's node is down, the write **still succeeds** on the other copy. Its log entry just
-stays open (`PENDING`) until that node returns.
+- If one copy's node is down, the write **still succeeds** on the other copy. Its log entry just
+  stays open (`PENDING`) until that node returns.
+- **New IDs** come from the first copy written (normally Node 1). Each node counts in steps of 3 from
+  its own offset, so IDs never clash even if the nodes can't reach each other.
+- `store_id` can't be changed, so a row never moves between fragments.
+- Every write reports **which copies committed, which are still owed the write, and every step**
+  (lock, write, log, commit) with timings. The app also logs one line per write (`[write] ...`).
+- If two writes hit the same row at once, the second waits for the first. If it waits more than
+  `LOCK_WAIT_TIMEOUT_S` (10 s), it gives up with *"nothing was saved; try again"*.
+  ([details](docs/decisions.md#d16-write-path-details-53-step-3))
 
 ### When a node fails, and when it comes back
 - Each app checks every few seconds which nodes respond:
@@ -119,9 +127,15 @@ that store line up there. The other copy is the **secondary**.
   live. ([details](docs/decisions.md#d14-primary-and-secondary-copies-51-53))
 
 ### Isolation level
-The isolation level is a **setting**: a default in `.env`, which the demo page can override per
-request. This lets us run the concurrency tests under all four levels and choose the best one
-from the results. Writes always lock their row (`SELECT … FOR UPDATE`), whatever the level.
+The isolation level is a **setting**, so we can run the concurrency tests under all four levels
+and pick the best one from the results:
+- **Default:** `ISOLATION_LEVEL` in `.env` (REPEATABLE READ for now).
+- **Payments page:** the *Isolation level* menu at the top right. It applies to every search and
+  write on that page, and is remembered in your browser.
+- **API / test scripts:** add `isolation` to any request, e.g. `?isolation=SERIALIZABLE` or
+  `"isolation": "READ COMMITTED"` in the JSON body.
+
+Writes always lock their row (`SELECT … FOR UPDATE`), whatever the level.
 
 ---
 
@@ -133,7 +147,7 @@ We build in this order. **After each step, the app is deployed on all three VMs.
 |---|---|---|---|---|
 | 1 | **Node status page** | Connects to all 3 databases and shows which nodes are up or down, and which copy of each store is primary. Kill / Restore buttons stop and start a node's MySQL. Deployed to all 3 VMs first to prove the setup works. Reused in the recovery demo. | Setup works | Built, not deployed |
 | 2 | **Reads** | List and search payments. Reads from the local node, and falls back to another node when one is down. | Data stays available | Built, not deployed |
-| 3 | **Writes** | Insert, update and delete, routed by `store_id` to the home node plus Node 1, using the lock order above. Isolation level becomes a setting. Adds a consistency check. | Copies stay in sync | To do |
+| 3 | **Writes** | Insert, update and delete, routed by `store_id` to the home node plus Node 1, using the lock order above. Isolation level becomes a setting. Adds a consistency check. | Copies stay in sync | Built, not deployed |
 | 4 | **Concurrency demo page** | Fires transactions from 2+ nodes at the same time, with `DO SLEEP` delays like in the hands-on. | Concurrency cases 1–3 | To do |
 | 5 | **Recovery** | Writes that can't reach a node go to the `replication_log`. A background job replays them in order when the node is back. | Recovery cases 1–4 | To do |
 | 6 | **Test scripts** | Python threads hitting the 3 app URLs, like the hands-on scripts. Each case runs 3+ times, and the logs are saved. | Evidence for the report | To do |
@@ -178,8 +192,8 @@ You need Node.js 22 or newer. In the repo folder:
 3. `npm start` (or `npm run dev` to restart automatically when you save a file)
 4. Open http://localhost:3000
 
-Your laptop app is a fourth instance of the app, talking to the real cloud databases. Steps 1 and 2
-only *read*, so running it is harmless. (Be careful once writes exist in step 3.)
+Your laptop app is a fourth instance of the app, talking to the **real cloud databases**. Searching
+is harmless, but **Add / Edit / Delete on your laptop change the real data** on the nodes.
 
 To use a port other than the one in `.env` (e.g. if 3000 is taken), set it for one run:
 `PORT=3001 npm start` in Git Bash.
@@ -219,8 +233,8 @@ Do this on **each** VM. SSH ports: Node 1 `20244`, Node 2 `20245`, Node 3 `20246
    ```
    For each VM, it copies the code to `/opt/mco2`, installs packages, and starts or restarts the app
    with pm2. Each VM's `.env` is left alone.
-3. **First deploy only:** create the `replication_log` table on every node. This is safe to re-run;
-   it never touches existing rows.
+3. **First deploy only:** create the `replication_log` table on every node. **Writes fail without
+   it.** This is safe to re-run; it never touches existing rows.
    ```bash
    for p in 20244 20245 20246; do ssh -p $p root@103.231.240.136 "mysql < /opt/mco2/sql/01_schema.sql"; done
    ```
@@ -242,10 +256,15 @@ then `systemctl start mysql`.)
 
 Then check reads: open **Payments** in the nav on each node, and try the fallback below.
 
+Then check writes: on Node 3's page, add a payment for **Store 1**. The *Last write* panel should
+say *Committed on Node 1 + Node 2* and *Copies match*. Edit it from Node 2's page, delete it from
+Node 1's page, and the status page should still say **Copies: Match ✓** for both stores.
+
 ### Reading the status page
 | Part | Meaning |
 |---|---|
 | **Store 1 / Store 2** cards | Which copy is primary and which is secondary right now. *Failover* means Node 1 is unavailable, so the store's own node leads. |
+| Copies (on the store cards) | The consistency check, every 5 s: Node 1's rows for that store vs the store's node (count, total and checksum). *Match ✓* is the pass condition for every test case. |
 | Badge (UP / RECOVERING / DOWN) | The node's status. Hover it for a short explanation. |
 | Role chip (*Primary · stores 1 & 2*, *Secondary · store 1*, *No role*) | The node's role. A DOWN or RECOVERING node has none. |
 | Database | How long connecting plus `SELECT 1` took, or *Not reachable* |
@@ -289,20 +308,49 @@ The **Read from** panel above the results shows where the data came from:
    **All stores**. The rows now come from *Node 2 + Node 3*.
 5. **Restore** the node. Within a few seconds the first choice is back.
 
-**The API** (used by the page, and later by the test scripts):
+**Add, edit and delete:**
+- **Add payment:** pick the store, type the customer ID and amount, and click *Add payment*. The ID
+  is assigned automatically, and *Paid on* defaults to now.
+- **Edit / Delete:** use the buttons on any row. Delete asks you to confirm. The store can't be
+  edited, because it decides which nodes hold the row.
+- After every write, the **Last write** panel shows:
+  - *Committed on*: the copies that have the change now;
+  - *Still owed to*: copies that will get it later from the log, and why (*down*, *recovering*, *behind*);
+  - the source node, isolation level, time and transaction id;
+  - *Steps*: every lock, write, log entry and commit, in order, with timings;
+  - the row as it is on every copy right now, with a *Copies match* badge.
 
-| Request | Returns |
+**Try a write while a node is down** (the demo for step 3): Kill Node 3 on the status page, then add
+a payment for **Store 2**. It succeeds with *Committed on Node 1* and *Still owed to Node 3 · down*.
+When Node 3 is restored, it shows **RECOVERING** (it is owed that write). Replaying the log comes in
+step 5; until then the node stays RECOVERING, and reads and writes keep avoiding it.
+
+**The API** (used by the page, and later by the test scripts). Every request accepts an optional
+`isolation` (see [Isolation level](#isolation-level)).
+
+| Request | Does |
 |---|---|
 | `GET /api/payments` | Payments, newest first. Optional filters: `store` (1 or 2), `id`, `customer`, `from` and `to` (dates like `2005-05-25`), `min` and `max` (amounts), plus `limit` (1–200, default 50) and `offset`. |
 | `GET /api/payments/16049` | One payment, or 404 if no copy has it. |
+| `POST /api/payments` | Adds a payment. JSON body: `store_id`, `customer_id`, `amount`, optional `payment_date` (`2026-11-24 10:15:00`). |
+| `PATCH /api/payments/16049` | Changes `customer_id`, `amount` and/or `payment_date`. |
+| `DELETE /api/payments/16049` | Deletes the payment from both copies. |
+| `GET /api/consistency` | Node 1 vs Node 2 + Node 3 for each store (count, total, checksum); `ok` is the pass/fail. |
+| `GET /api/consistency/16049` | That payment on every node, side by side, plus any log entries still owed for it. |
 
-Every response includes `servedBy` (node IDs that answered), `firstChoice`, `reason`, `skipped`
-(nodes not used, and why), `isolationLevel` and `ms`. Bad input gets a 400 that says what's wrong.
-If no copy is available, the response is a 503.
+- **Reads** include `servedBy` (the nodes that answered), `firstChoice`, `reason` and `skipped`.
+- **Writes** include `committed`, `pending` (copies still owed the write, and why), `source`,
+  `txnId` and `timeline` (every step).
+- **Both** include `isolationLevel` and `ms`.
+- **Errors:**
+  - 400: bad input, with a message saying what's wrong;
+  - 404: no such payment;
+  - 409: another write held the row too long (try again);
+  - 503: no copy available.
 
 ### Useful commands on a VM
 ```bash
-pm2 logs mco2-ddb          # live log: "Node 1: UP → DOWN", "[roles] Store 1: Node 2 took over as primary", "[read] ..."
+pm2 logs mco2-ddb          # live log: "[write] ... committed Node 1 + Node 2", "Node 1: UP → DOWN", "[roles] ..."
 pm2 ls                     # is the app running?
 pm2 restart mco2-ddb
 systemctl stop mysql       # simulate a crash
@@ -314,7 +362,8 @@ systemctl start mysql      # recover
   using port 80 (maybe from the earlier port test); find it with `ss -ltnp | grep ':80 '` and stop it.
 - **A node shows DOWN with `ER_ACCESS_DENIED_ERROR`:** wrong `DB_PASSWORD` in that VM's `.env`.
   Fix it, then run `pm2 restart mco2-ddb --update-env`.
-- **"The replication_log table is missing":** run step 3 of *Deploy* on that node.
+- **"The replication_log table is missing"** (status page or a failed write): run step 3 of *Deploy*
+  on that node.
 - **Deploy says `.env is missing`:** do *First-time setup* step 2 for that VM.
 - **Kill / Restore: "rejected the token" or "Wrong admin token":** `ADMIN_TOKEN` differs between
   the VMs, or the box at the top right has a typo. **"did not answer":** that node's app isn't

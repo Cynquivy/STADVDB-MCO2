@@ -20,14 +20,18 @@
   </header>
 
   <main class="page">
-    <section class="intro">
-      <p class="eyebrow">Distributed database</p>
+    <section class="toolbar">
       <h1>Payments</h1>
-      <p class="intro-text">
-        You never pick a node. The app reads from its own node when that node holds the payments,
-        otherwise from another copy, and falls back to the second copy when a node is down.
-        Each search shows which node answered.
-      </p>
+      <div class="toolbar-actions">
+        <label class="muted" for="isolation">Isolation level</label>
+        <select class="input input-sm" id="isolation" title="Used for every search and write on this page">
+          <option value="">Default (from .env)</option>
+          <option>READ UNCOMMITTED</option>
+          <option>READ COMMITTED</option>
+          <option>REPEATABLE READ</option>
+          <option>SERIALIZABLE</option>
+        </select>
+      </div>
     </section>
 
     <form class="filters" id="filters" novalidate>
@@ -71,7 +75,37 @@
       </div>
     </form>
 
+    <form class="filters add-form" id="add-form" novalidate>
+      <h2 class="section-label">Add payment</h2>
+      <div class="filter-grid">
+        <div class="field">
+          <label for="a-store">Store</label>
+          <select class="input" id="a-store" name="store_id">
+            <option value="1">Store 1</option>
+            <option value="2">Store 2</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="a-customer">Customer ID</label>
+          <input class="input" id="a-customer" name="customer_id" inputmode="numeric" autocomplete="off" placeholder="1 – 599" required>
+        </div>
+        <div class="field">
+          <label for="a-amount">Amount</label>
+          <input class="input" id="a-amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" required>
+        </div>
+        <div class="field">
+          <label for="a-date">Paid on</label>
+          <input class="input" id="a-date" name="payment_date" type="datetime-local" step="1" title="Leave empty for now">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn-primary" id="add" type="submit">Add payment</button>
+      </div>
+    </form>
+
     <div class="banner" id="banner" role="alert" hidden></div>
+
+    <section class="write" id="write" aria-live="polite" hidden></section>
 
     <section class="route" id="route" aria-live="polite" hidden></section>
 
@@ -93,6 +127,7 @@
               <th scope="col" class="num">Amount</th>
               <th scope="col">Paid on</th>
               <th scope="col">Read from</th>
+              <th scope="col"><span class="visually-hidden">Actions</span></th>
             </tr>
           </thead>
           <tbody id="rows"></tbody>

@@ -20,11 +20,20 @@ export function connectionOptions(nodeId) {
 
 const pools = new Map();
 
-export function getPool(nodeId) {
-  if (!pools.has(nodeId)) {
+// Two pools per node:
+//   'main' : transactions (reads and writes). A write holds one connection per copy until it commits.
+//   'meta' : short autocommit bookkeeping queries that a write makes WHILE holding its 'main'
+//            connections (reading or ticking off replication_log entries). If these came from the
+//            same pool, 10 concurrent writers could hold every connection and wait forever for an
+//            11th, so they get their own small pool.
+const POOL_SIZE = { main: 10, meta: 4 };
+
+export function getPool(nodeId, kind = 'main') {
+  const key = `${kind}:${nodeId}`;
+  if (!pools.has(key)) {
     const pool = mysql.createPool({
       ...connectionOptions(nodeId),
-      connectionLimit: 10,
+      connectionLimit: POOL_SIZE[kind],
       waitForConnections: true,
       enableKeepAlive: true,
       maxIdle: 2,
@@ -41,9 +50,9 @@ export function getPool(nodeId) {
       });
     });
 
-    pools.set(nodeId, pool);
+    pools.set(key, pool);
   }
-  return pools.get(nodeId);
+  return pools.get(key);
 }
 
 export async function closeAllPools() {

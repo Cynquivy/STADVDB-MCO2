@@ -6,6 +6,7 @@ import { config, NODES } from './config.js';
 import { startHealthChecks, stopHealthChecks } from './db/health.js';
 import { closeAllPools } from './db/pools.js';
 import adminRoutes from './routes/admin.js';
+import consistencyRoutes from './routes/consistency.js';
 import paymentRoutes from './routes/payments.js';
 import statusRoutes from './routes/status.js';
 
@@ -17,6 +18,7 @@ app.use(express.json());
 app.use('/api', statusRoutes);
 app.use('/api', paymentRoutes);
 app.use('/api', adminRoutes);
+app.use('/api', consistencyRoutes);
 
 app.get('/', (req, res) => res.redirect('/status.html'));
 app.use(express.static(path.join(here, 'public')));

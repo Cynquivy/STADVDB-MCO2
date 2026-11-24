@@ -1,6 +1,7 @@
 // Status page. The server does the checking in the background; this page shows the latest result
 // every second, so it reacts quickly during the demo. Kill / Restore stop or start a node's MySQL.
 const POLL_MS = 1000;
+const CONSISTENCY_MS = 5000; // the consistency check scans every row, so it runs less often
 const TOKEN_KEY = 'mco2-admin-token';
 
 const els = {
@@ -17,6 +18,7 @@ const els = {
 const busy = {}; // nodeId → 'stop' | 'start' while a Kill / Restore request runs
 let adminEnabled = false;
 let pointerDown = false; // see setHtml
+let consistency = null; // latest GET /api/consistency result
 
 const STATUS_HELP = {
   UP: 'Reachable and up to date',
@@ -109,8 +111,25 @@ function storeCard(store, r, nodes) {
       <dl class="facts">
         <div><dt>Primary</dt><dd>${copy(r.primary, 'none: no copy is UP')}</dd></div>
         <div><dt>Secondary</dt><dd>${copy(r.secondary, `none (${esc(missing.join(', '))})`)}</dd></div>
+        <div><dt>Copies</dt><dd>${copiesText(Number(store))}</dd></div>
       </dl>
     </article>`;
+}
+
+// Node 1's rows for this store vs the home node's: count, sum and checksum must all agree.
+function copiesText(store) {
+  const s = consistency?.stores?.find((x) => x.store === store);
+  if (!s) return '<span class="muted">checking…</span>';
+  if (s.match === null) return '<span class="muted">not compared: a copy is unreachable</span>';
+  if (s.match) return `<span class="ok">Match ✓</span> · ${fmt(s.central.rows)} rows`;
+  return `<span class="warn">Different</span> · Node 1 ${fmt(s.central.rows)} rows, Node ${s.homeNode} ${fmt(s.fragment.rows)}`;
+}
+
+async function loadConsistency() {
+  try {
+    const res = await fetch('/api/consistency', { cache: 'no-store' });
+    if (res.ok) consistency = await res.json();
+  } catch {}
 }
 
 function nodeCard(node, role) {
@@ -268,3 +287,5 @@ els.nodes.addEventListener('click', (e) => {
 rememberToken();
 load();
 setInterval(load, POLL_MS);
+loadConsistency().then(load);
+setInterval(loadConsistency, CONSISTENCY_MS);
